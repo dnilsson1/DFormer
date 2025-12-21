@@ -1,11 +1,15 @@
-GPUS=2
+GPUS=1
 NNODES=1
 NODE_RANK=${NODE_RANK:-0}
 PORT=${PORT:-29158}
 MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 
-export CUDA_VISIBLE_DEVICES="0,1"
+export CUDA_VISIBLE_DEVICES="0"
 export TORCHDYNAMO_VERBOSE=1
+export LOCAL_RANK=0
+export RANK=0
+export WORLD_SIZE=1
+export PYTHONPATH="/workspace:$PYTHONPATH"
 
 PYTHONPATH="$(dirname $0)/..":"$(dirname $0)":$PYTHONPATH \
     torchrun \
@@ -15,7 +19,7 @@ PYTHONPATH="$(dirname $0)/..":"$(dirname $0)":$PYTHONPATH \
     --nproc_per_node=$GPUS \
     --master_port=$PORT \
     utils/train.py \
-    --config=local_configs.NYUDepthv2.DFormerv2_S --gpus=$GPUS \
+    --config=local_configs.JARVIS.DFormerv2_Base_custom --gpus=$GPUS \
     --no-sliding \
     --no-compile \
     --syncbn \
@@ -23,8 +27,11 @@ PYTHONPATH="$(dirname $0)/..":"$(dirname $0)":$PYTHONPATH \
     --compile_mode="default" \
     --no-amp \
     --val_amp \
-    --pad_SUNRGBD \
-    --no-use_seed
+    --use_seed \
+    --tensorboard
+    
+# To resume from checkpoint, add this line before --no-sliding:
+# --continue_fpath=checkpoints/Dformer_format_DFormerv2_B/epoch-1_miou_8.79.pth \
 
 # config for DFormers on NYUDepthv2
 # local_configs.NYUDepthv2.DFormer_Large

@@ -179,8 +179,9 @@ def get_train_loader(engine, dataset, config):
         num_workers=config.num_workers,
         drop_last=True,
         shuffle=is_shuffle,
-        pin_memory=True,
+        pin_memory=False,  # Disable to reduce host memory pressure
         sampler=train_sampler,
+        persistent_workers=False,  # Recreate workers each epoch to prevent hanging
         # worker_init_fn=seed_worker,
         # generator=g,
     )
@@ -224,8 +225,9 @@ def get_val_loader(engine, dataset, config, val_batch_size=1):
         num_workers=config.num_workers,
         drop_last=False,
         shuffle=is_shuffle,
-        pin_memory=True,
+        pin_memory=False,  # Disable to reduce host memory pressure
         sampler=val_sampler,
+        persistent_workers=False,  # Recreate workers each validation to prevent hanging
         # worker_init_fn=seed_worker,
         # generator=g,
     )

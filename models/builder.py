@@ -245,10 +245,39 @@ class EncoderDecoder(nn.Module):
         else:
             out = self.encode_decode(rgb, modal_x)
         if label is not None:
-            loss = self.criterion(out, label.long())[label.long() != self.cfg.background].mean()
-            if self.aux_head:
-                loss += (
-                    self.aux_rate * self.criterion(aux_fm, label.long())[label.long() != self.cfg.background].mean()
-                )
+            # Handle Focal Loss vs CrossEntropy differently
+            # Focal Loss already masks ignore_index internally and returns [B, H, W]
+            # CrossEntropy with reduction='none' returns [B, H, W] and needs manual masking
+            from models.losses.segmentation_focal_loss import SegmentationFocalLoss
+            
+            if isinstance(self.criterion, SegmentationFocalLoss):
+                # Focal Loss already handles ignore_index, just compute mean
+                loss_map = self.criterion(out, label.long())
+                # Focal Loss returns 0 for ignored pixels, so we can safely mean over valid pixels
+                valid_mask = (label.long() != self.cfg.background)
+                if valid_mask.sum() > 0:
+                    loss = loss_map[valid_mask].mean()
+                else:
+                    loss = loss_map.sum() * 0.0  # Keep graph, return 0
+                    
+                if self.aux_head:
+                    aux_loss_map = self.criterion(aux_fm, label.long())
+                    if valid_mask.sum() > 0:
+                        loss += self.aux_rate * aux_loss_map[valid_mask].mean()
+            else:
+                # Standard CrossEntropy handling with safe empty-mask fallback
+                loss_map = self.criterion(out, label.long())
+                valid_mask = label.long() != self.cfg.background
+                if valid_mask.any():
+                    loss = loss_map[valid_mask].mean()
+                else:
+                    loss = loss_map.sum() * 0.0  # keep graph, zero loss when no valid pixels
+
+                if self.aux_head:
+                    aux_loss_map = self.criterion(aux_fm, label.long())
+                    if valid_mask.any():
+                        loss += self.aux_rate * aux_loss_map[valid_mask].mean()
+                    else:
+                        loss = loss + aux_loss_map.sum() * 0.0
             return loss
         return out

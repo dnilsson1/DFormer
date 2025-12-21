@@ -108,6 +108,13 @@ def evaluate(model, dataloader, config, device, engine, save_dir=None, sliding=F
         # print(preds.shape,labels.shape)
         B, H, W = labels.shape
         metrics.update(preds, labels)
+        
+        # Clear tensors to free memory during validation
+        del preds, images, labels, modal_xs
+        
+        # Periodically clear cache during long validation runs
+        if (idx + 1) % 10 == 0:
+            torch.cuda.empty_cache()
         # for i in range(B):
         #     metrics.update(preds[i].unsqueeze(0), labels[i].unsqueeze(0))
         # metrics.update(preds, labels)
@@ -164,8 +171,37 @@ def evaluate(model, dataloader, config, device, engine, save_dir=None, sliding=F
                 )
                 preds = palette[preds]
                 plt.imsave(save_name, preds)
+            elif config.dataset_name in ["Dformer_format", "JARVIS"]:
+                # Custom palette for JARVIS dataset (18 classes)
+                palette = np.array([
+                    [0, 0, 0],        # background
+                    [128, 0, 0],      # battery
+                    [0, 128, 0],      # cable
+                    [128, 128, 0],    # connector
+                    [0, 0, 128],      # display
+                    [128, 0, 128],    # electronics_board
+                    [0, 128, 128],    # human_body
+                    [128, 128, 128],  # keyboard
+                    [64, 0, 0],       # lamp
+                    [192, 0, 0],      # laptop
+                    [64, 128, 0],     # mouse
+                    [192, 128, 0],    # pcb
+                    [64, 0, 128],     # robot
+                    [192, 0, 128],    # screwdriver
+                    [64, 128, 128],   # socket
+                    [192, 128, 128],  # soldering_iron
+                    [0, 64, 0],       # tool
+                    [128, 64, 0],     # wire
+                    [0, 192, 0],      # hand
+                ], dtype=np.uint8)
+                preds = palette[preds]
+                plt.imsave(save_name, preds)
             else:
-                assert 1 == 2
+                # Fallback: create a simple grayscale palette for unknown datasets
+                num_classes = preds.max() + 1
+                palette = np.array([[i * (255 // max(1, num_classes-1))] * 3 for i in range(num_classes)], dtype=np.uint8)
+                preds = palette[preds]
+                plt.imsave(save_name, preds)
 
     # ious, miou = metrics.compute_iou()
     # acc, macc = metrics.compute_pixel_acc()
@@ -352,8 +388,37 @@ def evaluate_msf(
                 )
                 preds = palette[preds]
                 plt.imsave(save_name, preds)
+            elif config.dataset_name in ["Dformer_format", "JARVIS"]:
+                # Custom palette for JARVIS dataset (18 classes)
+                palette = np.array([
+                    [0, 0, 0],        # background
+                    [128, 0, 0],      # battery
+                    [0, 128, 0],      # cable
+                    [128, 128, 0],    # connector
+                    [0, 0, 128],      # display
+                    [128, 0, 128],    # electronics_board
+                    [0, 128, 128],    # human_body
+                    [128, 128, 128],  # keyboard
+                    [64, 0, 0],       # lamp
+                    [192, 0, 0],      # laptop
+                    [64, 128, 0],     # mouse
+                    [192, 128, 0],    # pcb
+                    [64, 0, 128],     # robot
+                    [192, 0, 128],    # screwdriver
+                    [64, 128, 128],   # socket
+                    [192, 128, 128],  # soldering_iron
+                    [0, 64, 0],       # tool
+                    [128, 64, 0],     # wire
+                    [0, 192, 0],      # hand
+                ], dtype=np.uint8)
+                preds = palette[preds]
+                plt.imsave(save_name, preds)
             else:
-                assert 1 == 2
+                # Fallback: create a simple grayscale palette for unknown datasets
+                num_classes = preds.max() + 1
+                palette = np.array([[i * (255 // max(1, num_classes-1))] * 3 for i in range(num_classes)], dtype=np.uint8)
+                preds = palette[preds]
+                plt.imsave(save_name, preds)
 
         metrics.update(scaled_logits, labels)
 

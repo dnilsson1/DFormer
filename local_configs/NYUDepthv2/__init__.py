@@ -1,0 +1,1 @@
+# NYUDepthv2 configuration module

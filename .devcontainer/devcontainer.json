@@ -1,0 +1,15 @@
+{
+"name": "DFormer (compose)",
+"dockerComposeFile": ["../docker-compose.yml"],
+"service": "dformer",
+"workspaceFolder": "/workspace",
+"workspaceMount": "type=volume,source=dformer_workspace,target=/workspace",
+"runArgs": ["--gpus", "all"],
+"forwardPorts": [6006, 29158],
+"extensions": [
+"ms-python.python",
+"ms-python.vscode-pylance"
+],
+"postCreateCommand": "pip install -r requirements.txt || true",
+"remoteUser": "root"
+}

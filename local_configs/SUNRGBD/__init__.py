@@ -1,0 +1,1 @@
+# SUNRGBD configuration module

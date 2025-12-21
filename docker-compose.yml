@@ -1,0 +1,24 @@
+services:
+  dformer:
+    image: dformer:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    volumes:
+      - ./:/workspace
+      # mount dataset (adjust Windows path if needed)
+      - ./datasets:/workspace/datasets:rw
+      - ./checkpoints:/workspace/checkpoints:rw
+    shm_size: '8gb'
+    ports:
+      - "6006:6006"  # TensorBoard
+    tty: true
+    stdin_open: true

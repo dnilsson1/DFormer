@@ -288,8 +288,11 @@ class DFormer(BaseModule):
         _state_dict = torch.load(pretrained)
         if "state_dict_ema" in _state_dict.keys():
             _state_dict = _state_dict["state_dict_ema"]
-        else:
+        elif "state_dict" in _state_dict.keys():
             _state_dict = _state_dict["state_dict"]
+        elif "model" in _state_dict.keys():
+            _state_dict = _state_dict["model"]
+        # else: assume the whole file is the state dict
 
         state_dict = OrderedDict()
         for k, v in _state_dict.items():

@@ -44,6 +44,7 @@ parser.add_argument("--amp", default=True, action=argparse.BooleanOptionalAction
 parser.add_argument("--val_amp", default=True, action=argparse.BooleanOptionalAction)
 parser.add_argument("--pad_SUNRGBD", default=False, action=argparse.BooleanOptionalAction)
 parser.add_argument("--use_seed", default=True, action=argparse.BooleanOptionalAction)
+parser.add_argument("-tb", "--tensorboard", default=True, action=argparse.BooleanOptionalAction, help="Enable TensorBoard logging")
 parser.add_argument("--local-rank", default=0)
 # parser.add_argument('--save_path', '-p', default=None)
 
@@ -56,7 +57,8 @@ torch._dynamo.config.suppress_errors = True
 
 
 def is_eval(epoch, config):
-    return epoch > int(config.checkpoint_start_epoch) or epoch == 1 or epoch % 10 == 0
+    eval_iter = getattr(config, 'eval_iter', 10)  # Default to every 10 epochs
+    return epoch == 1 or epoch % eval_iter == 0
 
 
 class gpu_timer:
@@ -166,10 +168,15 @@ with Engine(custom_parser=parser) as engine:
     logger.info(f"val dataset len:{len(val_loader) * int(args.gpus)}")
 
     if (engine.distributed and (engine.local_rank == 0)) or (not engine.distributed):
-        tb_dir = config.tb_dir + "/{}".format(time.strftime("%b%d_%d-%H-%M", time.localtime()))
-        generate_tb_dir = config.tb_dir + "/tb"
-        tb = SummaryWriter(log_dir=tb_dir)
-        engine.link_tb(tb_dir, generate_tb_dir)
+        if args.tensorboard:
+            tb_dir = config.tb_dir + "/{}".format(time.strftime("%b%d_%d-%H-%M", time.localtime()))
+            generate_tb_dir = config.tb_dir + "/tb"
+            tb = SummaryWriter(log_dir=tb_dir)
+            engine.link_tb(tb_dir, generate_tb_dir)
+            logger.info(f"TensorBoard enabled: {tb_dir}")
+        else:
+            tb = None
+            logger.info("TensorBoard disabled")
         pp = pprint.PrettyPrinter(indent=4)
         logger.info("config: \n" + pp.pformat(config))
 
@@ -177,7 +184,38 @@ with Engine(custom_parser=parser) as engine:
     for k in args.__dict__:
         logger.info(k + ": " + str(args.__dict__[k]))
 
-    criterion = nn.CrossEntropyLoss(reduction="none", ignore_index=config.background)
+    # Configure loss function based on config settings
+    # Supports both CrossEntropyLoss and FocalLoss for class imbalance handling
+    use_focal_loss = getattr(config, 'use_focal_loss', False)
+    
+    if config.use_focal_loss:
+        # Use Focal Loss for automatic hard example mining
+        from models.losses.segmentation_focal_loss import SegmentationFocalLoss
+        
+        focal_gamma = getattr(config, 'focal_gamma', 2.0)
+        focal_alpha = getattr(config, 'focal_alpha', 0.25)
+        # Don't use class_weights with Focal Loss unless explicitly set and not None
+        class_weights = getattr(config, 'class_weights', None)
+        
+        criterion = SegmentationFocalLoss(
+            num_classes=config.num_classes,
+            gamma=focal_gamma,
+            alpha=focal_alpha,
+            class_weights=class_weights,  # Will be None - focal loss handles imbalance
+            ignore_index=config.background,
+            reduction='none'  # Return per-pixel loss, builder.py will handle masking and mean
+        )
+        logger.info(f"Using Focal Loss: gamma={focal_gamma}, alpha={focal_alpha}, "
+                   f"class_weights={'enabled' if class_weights is not None else 'disabled (focal loss handles imbalance)'}")
+    else:
+        # Use standard CrossEntropyLoss with optional class weights
+        class_weights = None
+        if hasattr(config, 'class_weights') and config.class_weights is not None:
+            import torch
+            class_weights = torch.FloatTensor(config.class_weights).cuda()
+            logger.info(f"Using class weights for {len(class_weights)} classes")
+        
+        criterion = nn.CrossEntropyLoss(reduction="none", ignore_index=config.background, weight=class_weights)
 
     if args.syncbn:
         BatchNorm2d = nn.SyncBatchNorm
@@ -289,6 +327,8 @@ with Engine(custom_parser=parser) as engine:
         model.train()
         if engine.distributed:
             train_sampler.set_epoch(epoch)
+        if hasattr(train_loader.dataset, "refresh_epoch"):
+            train_loader.dataset.refresh_epoch()
         # bar_format = "{desc}[{elapsed}<{remaining},{rate_fmt}]"
         # pbar = tqdm(
         #     range(config.niters_per_epoch),
@@ -321,6 +361,15 @@ with Engine(custom_parser=parser) as engine:
                     loss = model(imgs, modal_xs, gts)
             else:
                 loss = model(imgs, modal_xs, gts)
+            
+            # Check for NaN loss and log details
+            if torch.isnan(loss):
+                logger.error(f"NaN loss detected at epoch {epoch}, iter {idx}")
+                logger.error(f"  Images: min={imgs.min():.4f}, max={imgs.max():.4f}, mean={imgs.mean():.4f}")
+                logger.error(f"  Depth: min={modal_xs.min():.4f}, max={modal_xs.max():.4f}, mean={modal_xs.mean():.4f}")
+                logger.error(f"  Labels: min={gts.min()}, max={gts.max()}, unique={torch.unique(gts).tolist()}")
+                # Skip this batch
+                continue
 
             # reduce the whole loss over multi-gpu
             if engine.distributed:
@@ -337,9 +386,9 @@ with Engine(custom_parser=parser) as engine:
             else:
                 optimizer.zero_grad()
                 loss.backward()
+                # Clip gradients to prevent explosion
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
-
-            if not args.amp:
                 if epoch == 1:
                     for name, param in model.named_parameters():
                         if param.grad is None:
@@ -361,14 +410,14 @@ with Engine(custom_parser=parser) as engine:
                 )
 
             else:
-                sum_loss += loss
+                sum_loss += loss.item()
                 print_str = (
                     f"Epoch {epoch}/{config.nepochs} "
                     + f"Iter {idx + 1}/{config.niters_per_epoch}: "
                     + f"lr={lr:.4e} loss={loss:.4f} total_loss={(sum_loss / (idx + 1)):.4f}"
                 )
 
-            if ((idx + 1) % int((config.niters_per_epoch) * 0.1) == 0 or idx == 0) and (
+            if ((idx + 1) % int((config.niters_per_epoch) * 0.025) == 0 or idx == 0) and (
                 (engine.distributed and (engine.local_rank == 0)) or (not engine.distributed)
             ):
                 print(print_str)
@@ -378,23 +427,46 @@ with Engine(custom_parser=parser) as engine:
         logger.info(print_str)
         train_timer.stop()
 
-        # if (engine.distributed and (engine.local_rank == 0)) or (
-        #     not engine.distributed
-        # ):
-        #     tb.add_scalar("train_loss", sum_loss / len(pbar), epoch)
+        if ((engine.distributed and (engine.local_rank == 0)) or (not engine.distributed)) and args.tensorboard and tb is not None:
+            tb.add_scalar("train_loss", float(sum_loss / config.niters_per_epoch), epoch)
+            tb.add_scalar("learning_rate", float(lr), epoch)
 
         if is_eval(epoch, config):
             eval_timer.start()
             torch.cuda.empty_cache()
-            # if args.compile and args.mst and (not args.sliding):
-            #     model = uncompiled_model
-            # TODO: FIX this
-            if engine.distributed:
-                with torch.no_grad():
-                    model.eval()
-                    device = torch.device("cuda")
-                    if args.val_amp:
-                        with torch.autocast(device_type="cuda", dtype=torch.float16):
+            eval_success = False  # Track if evaluation completed successfully
+            miou = 0.0  # Initialize miou in case eval fails
+            try:
+                # if args.compile and args.mst and (not args.sliding):
+                #     model = uncompiled_model
+                # TODO: FIX this
+                if engine.distributed:
+                    with torch.no_grad():
+                        model.eval()
+                        device = torch.device("cuda")
+                        if args.val_amp:
+                            with torch.autocast(device_type="cuda", dtype=torch.float16):
+                                if args.mst:
+                                    all_metrics = evaluate_msf(
+                                        model,
+                                        val_loader,
+                                        config,
+                                        device,
+                                        [0.5, 0.75, 1.0, 1.25, 1.5],
+                                        True,
+                                        engine,
+                                        sliding=args.sliding,
+                                    )
+                                else:
+                                    all_metrics = evaluate(
+                                        model,
+                                        val_loader,
+                                        config,
+                                        device,
+                                        engine,
+                                        sliding=args.sliding,
+                                    )
+                        else:
                             if args.mst:
                                 all_metrics = evaluate_msf(
                                     model,
@@ -415,50 +487,59 @@ with Engine(custom_parser=parser) as engine:
                                     engine,
                                     sliding=args.sliding,
                                 )
-                    else:
-                        if args.mst:
-                            all_metrics = evaluate_msf(
-                                model,
-                                val_loader,
-                                config,
-                                device,
-                                [0.5, 0.75, 1.0, 1.25, 1.5],
-                                True,
-                                engine,
-                                sliding=args.sliding,
-                            )
+                        if engine.local_rank == 0:
+                            metric = all_metrics[0]
+                            for other_metric in all_metrics[1:]:
+                                metric.update_hist(other_metric.hist)
+                            ious, miou = metric.compute_iou()
+                            acc, macc = metric.compute_pixel_acc()
+                            f1, mf1 = metric.compute_f1()
+                            if miou > best_miou:
+                                best_miou = miou
+                                engine.save_and_link_checkpoint(
+                                    config.log_dir,
+                                    config.log_dir,
+                                    config.log_dir_link,
+                                    infor="_miou_" + str(miou),
+                                    metric=miou,
+                                )
+                            print("miou", miou, "best", best_miou)
+                            # Log validation metrics to TensorBoard
+                            if args.tensorboard and tb is not None:
+                                tb.add_scalar("val_miou", miou, epoch)
+                                tb.add_scalar("val_best_miou", best_miou, epoch)
+                                tb.add_scalar("val_pixel_acc", acc, epoch)
+                                tb.add_scalar("val_mean_acc", macc, epoch)
+                                tb.add_scalar("val_f1", f1, epoch)
+                                tb.add_scalar("val_mean_f1", mf1, epoch)
+                            eval_success = True  # Mark eval as successful (distributed)
+                elif not engine.distributed:
+                    with torch.no_grad():
+                        model.eval()
+                        device = torch.device("cuda")
+                        if args.val_amp:
+                            with torch.autocast(device_type="cuda", dtype=torch.float16):
+                                if args.mst:
+                                    metric = evaluate_msf(
+                                        model,
+                                        val_loader,
+                                        config,
+                                        device,
+                                        [0.5, 0.75, 1.0, 1.25, 1.5],
+                                        True,
+                                        engine,
+                                        sliding=args.sliding,
+                                    )
+                                else:
+                                    metric = evaluate(
+                                        model,
+                                        val_loader,
+                                        config,
+                                        device,
+                                        engine,
+                                        sliding=args.sliding,
+                                    )
                         else:
-                            all_metrics = evaluate(
-                                model,
-                                val_loader,
-                                config,
-                                device,
-                                engine,
-                                sliding=args.sliding,
-                            )
-                    if engine.local_rank == 0:
-                        metric = all_metrics[0]
-                        for other_metric in all_metrics[1:]:
-                            metric.update_hist(other_metric.hist)
-                        ious, miou = metric.compute_iou()
-                        acc, macc = metric.compute_pixel_acc()
-                        f1, mf1 = metric.compute_f1()
-                        if miou > best_miou:
-                            best_miou = miou
-                            engine.save_and_link_checkpoint(
-                                config.log_dir,
-                                config.log_dir,
-                                config.log_dir_link,
-                                infor="_miou_" + str(miou),
-                                metric=miou,
-                            )
-                        print("miou", miou, "best", best_miou)
-            elif not engine.distributed:
-                with torch.no_grad():
-                    model.eval()
-                    device = torch.device("cuda")
-                    if args.val_amp:
-                        with torch.autocast(device_type="cuda", dtype=torch.float16):
                             if args.mst:
                                 metric = evaluate_msf(
                                     model,
@@ -479,52 +560,79 @@ with Engine(custom_parser=parser) as engine:
                                     engine,
                                     sliding=args.sliding,
                                 )
-                    else:
-                        if args.mst:
-                            metric = evaluate_msf(
-                                model,
-                                val_loader,
-                                config,
-                                device,
-                                [0.5, 0.75, 1.0, 1.25, 1.5],
-                                True,
-                                engine,
-                                sliding=args.sliding,
-                            )
-                        else:
-                            metric = evaluate(
-                                model,
-                                val_loader,
-                                config,
-                                device,
-                                engine,
-                                sliding=args.sliding,
-                            )
-                    ious, miou = metric.compute_iou()
-                    acc, macc = metric.compute_pixel_acc()
-                    f1, mf1 = metric.compute_f1()
-                    # print('miou',miou)
-                # print('acc, macc, f1, mf1, ious, miou',acc, macc, f1, mf1, ious, miou)
-                # print('miou',miou)
-                if miou > best_miou:
-                    best_miou = miou
-                    engine.save_and_link_checkpoint(
-                        config.log_dir,
-                        config.log_dir,
-                        config.log_dir_link,
-                        infor="_miou_" + str(miou),
-                        metric=miou,
-                    )
-                print("miou", miou, "best", best_miou)
-            logger.info(f"Epoch {epoch} validation result: mIoU {miou}, best mIoU {best_miou}")
+                        ious, miou = metric.compute_iou()
+                        acc, macc = metric.compute_pixel_acc()
+                        f1, mf1 = metric.compute_f1()
+                        
+                        # Log per-class IoU for detailed analysis
+                        logger.info(f"\n{'='*80}")
+                        logger.info(f"Epoch {epoch} - Per-Class IoU Breakdown:")
+                        logger.info(f"{'='*80}")
+                        for idx, (class_name, iou) in enumerate(zip(config.class_names, ious)):
+                            logger.info(f"  Class {idx:2d} - {class_name:25s}: {iou:6.2f}%")
+                        logger.info(f"{'='*80}")
+                        logger.info(f"  Mean IoU: {miou:.2f}%")
+                        logger.info(f"  Mean Acc: {macc:.2f}%")
+                        logger.info(f"  Mean F1:  {mf1:.2f}%")
+                        logger.info(f"{'='*80}\n")
+                        
+                    # Outside with block but still inside elif
+                    if miou > best_miou:
+                        best_miou = miou
+                        engine.save_and_link_checkpoint(
+                            config.log_dir,
+                            config.log_dir,
+                            config.log_dir_link,
+                            infor="_miou_" + str(miou),
+                            metric=miou,
+                        )
+                    print("miou", miou, "best", best_miou)
+                    # Log validation metrics to TensorBoard (non-distributed)
+                    if args.tensorboard and tb is not None:
+                        tb.add_scalar("val_miou", float(miou), epoch)
+                        tb.add_scalar("val_best_miou", float(best_miou), epoch)
+                        tb.add_scalar("val_mean_acc", float(macc), epoch)
+                        tb.add_scalar("val_mean_f1", float(mf1), epoch)
+                        
+                        # Log per-class IoU to TensorBoard
+                        for idx, (class_name, iou) in enumerate(zip(config.class_names, ious)):
+                            tb.add_scalar(f"val_iou/{class_name}", float(iou), epoch)
+                    eval_success = True  # Mark eval as successful
+            except Exception as e:
+                logger.error(f"Epoch {epoch} evaluation failed: {str(e)}")
+                logger.error("Continuing training without eval metrics for this epoch...")
+                torch.cuda.empty_cache()
+                import gc
+                gc.collect()
+            
+            if eval_success:
+                logger.info(f"Epoch {epoch} validation result: mIoU {miou:.2f}%, best mIoU {best_miou:.2f}%")
             eval_timer.stop()
 
         eval_count = 0
         for i in range(engine.state.epoch + 1, config.nepochs + 1):
             if is_eval(i, config):
                 eval_count += 1
-        left_time = train_timer.mean_time * (config.nepochs - engine.state.epoch) + eval_timer.mean_time * eval_count
+        # Safely handle None mean_time values
+        train_mean = train_timer.mean_time if train_timer.mean_time is not None else 0.0
+        eval_mean = eval_timer.mean_time if eval_timer.mean_time is not None else 0.0
+        left_time = train_mean * (config.nepochs - engine.state.epoch) + eval_mean * eval_count
         eta = (datetime.datetime.now() + datetime.timedelta(seconds=left_time)).strftime("%Y-%m-%d %H:%M:%S")
         logger.info(
-            f"Avg train time: {train_timer.mean_time:.2f}s, avg eval time: {eval_timer.mean_time:.2f}s, left eval count: {eval_count}, ETA: {eta}"
+            f"Avg train time: {train_mean:.2f}s, avg eval time: {eval_mean:.2f}s, left eval count: {eval_count}, ETA: {eta}"
         )
+        
+        # Clear GPU cache and cleanup workers after each epoch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        
+        # Force garbage collection to cleanup any hanging references
+        import gc
+        gc.collect()
+        
+        # Additional cleanup - delete optimizer state temporarily and recreate
+        # This helps prevent memory accumulation between epochs
+        if (epoch + 1) % 5 == 0:  # Every 5 epochs
+            torch.cuda.empty_cache()
+            gc.collect()

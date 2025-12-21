@@ -2,6 +2,7 @@ import os
 import cv2
 import torch
 import numpy as np
+import warnings
 
 import torch.utils.data as data
 
@@ -125,11 +126,21 @@ class RGBXDataset(data.Dataset):
         self._eval_source = setting["eval_source"]
         self.class_names = setting["class_names"]
         self._file_names = self._get_file_names(split_name)
+        # Run quick dataset label encoding consistency validation (sample a few files)
+        try:
+            self._validate_label_encoding()
+        except Exception:
+            # Don't break the dataset init if validation fails (it would be noisy in some cases)
+            warnings.warn("Label encoding validation failed or could not run - proceeding without failing.")
         self._file_length = file_length
+        self._cached_file_names = None
         self.preprocess = preprocess
         self.dataset_name = setting["dataset_name"]
         self.x_modal = setting.get("x_modal", ["d"])
         self.backbone = setting["backbone"]
+
+        if self._file_length is not None:
+            self.refresh_epoch()
 
     def __len__(self):
         if self._file_length is not None:
@@ -138,7 +149,9 @@ class RGBXDataset(data.Dataset):
 
     def __getitem__(self, index):
         if self._file_length is not None:
-            item_name = self._construct_new_file_names(self._file_length)[index]
+            if self._cached_file_names is None:
+                self.refresh_epoch()
+            item_name = self._cached_file_names[index % len(self._cached_file_names)]
         else:
             item_name = self._file_names[index]
 
@@ -237,6 +250,11 @@ class RGBXDataset(data.Dataset):
 
         return new_file_names
 
+    def refresh_epoch(self):
+        """Regenerate cached sampling order for the next epoch."""
+        if self._file_length is not None:
+            self._cached_file_names = self._construct_new_file_names(self._file_length)
+
     def get_length(self):
         return self.__len__()
 
@@ -253,7 +271,84 @@ class RGBXDataset(data.Dataset):
 
     @staticmethod
     def _gt_transform(gt):
-        return gt - 1
+        # Some datasets use 1..N for classes and 255 as background/ignore label.
+        # The previous simple 'gt - 1' unconditionally subtracted 1 from 255 -> 254,
+        # which no longer matches config.background=255 and causes the background
+        # pixels to be treated as a valid class. Only subtract 1 for valid class
+        # labels (not the background 255). Keep 255 as an explicit ignore value.
+        gt = gt.astype("int32")
+        mask = gt != 255
+        gt[mask] = gt[mask] - 1
+        return gt.astype(np.uint8)
+
+    def _validate_label_encoding(self, sample_n=12):
+        """Quick sanity check to detect inconsistent or ambiguous label encodings.
+
+        - Scans up to `sample_n` ground truth images and collects unique label values.
+        - Warns if both 0 and 255 are present across the samples (ambiguous background encodings).
+        - Warns if 254 is present (often a symptom of previous incorrect `gt - 1` that turned 255->254).
+        - Returns a dict with a summary of findings.
+        """
+        if not hasattr(self, "_file_names") or len(self._file_names) == 0:
+            return {}
+
+        n = min(sample_n, len(self._file_names))
+        sampled = self._file_names[:n]
+        found = set()
+        values_counter = {}
+        for f in sampled:
+            path = get_path(
+                self.dataset_name,
+                self._rgb_path,
+                self._rgb_format,
+                self._x_path,
+                self._x_format,
+                self._gt_path,
+                self._gt_format,
+                self.x_modal,
+                f,
+            )["gt_path"]
+            if not os.path.exists(path):
+                continue
+            gt = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+            if gt is None:
+                continue
+            u = np.unique(gt)
+            for v in u.tolist():
+                found.add(int(v))
+                values_counter[int(v)] = values_counter.get(int(v), 0) + 1
+
+        # Determine presence
+        has_0 = 0 in found
+        has_255 = 255 in found
+        has_254 = 254 in found
+
+        if has_0 and has_255:
+            warnings.warn(
+                "Dataset labels appear to include both 0 and 255 in sampled GTs — this may be an inconsistent label encoding across files. "
+                "Please normalize to use either 0 (with background->255 after gt_transform) OR 255 as the ignore label, but not both.")
+        if has_254:
+            warnings.warn(
+                "Label 254 detected in dataset — this may indicate that the labels were previously transformed incorrectly (e.g., 255-1 => 254). "
+                "Please re-generate GTs or ensure loader transformation is correct.")
+
+        # Collect a small report
+        summary = {
+            "sampled_files": n,
+            "found_values_sample": sorted(list(found))[:50],
+            "counts": values_counter,
+            "has_0": has_0,
+            "has_255": has_255,
+            "has_254": has_254,
+        }
+        # Minimal logging
+        if has_255 and not has_0:
+            # Using 255 to denote background across samples — ok
+            return summary
+        if not has_255 and has_0:
+            # Using 0 as background — ok
+            return summary
+        return summary
 
     @classmethod
     def get_class_colors(*args):

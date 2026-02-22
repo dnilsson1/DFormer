@@ -5,9 +5,9 @@ echo ""
 
 # Parse command-line arguments (allow override of defaults)
 CONFIG="${CONFIG:-local_configs.JARVIS.DFormerv2_Base_custom}"
-CHECKPOINT="${CHECKPOINT:-/workspace/checkpoints/Dformer_format_DFormerv2_B/epoch-10_miou_46.43.pth}"
+CHECKPOINT="${CHECKPOINT:-/workspace/checkpoints/Dformer_format_DFormerv2_B_freqval/epoch-8_miou_66.35.pth}"
 GPUS="${GPUS:-1}"
-SAVE_PATH="${SAVE_PATH:-inference_results_epoch-10_miou_46.43}"
+SAVE_PATH="${SAVE_PATH:-inference_results_epoch-8_miou_66.35}"
 SHOW_IMAGE="${SHOW_IMAGE:---show_image}"
 VERBOSE="${VERBOSE:---verbose}"
 

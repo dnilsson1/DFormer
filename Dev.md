@@ -1,4 +1,8 @@
 # How to run
+
+### Start tensorboardx in the container
+docker-compose exec -d dformer bash -lc "cd /workspace && tensorboard --logdir=checkpoints --host=0.0.0.0 --port=6006"
+
 ### Start full training
 docker-compose exec -d dformer bash /workspace/train.sh
 
@@ -18,10 +22,10 @@ docker-compose exec dformer bash /workspace/monitor_dashboard.sh
 docker-compose exec dformer bash /workspace/infer.sh
 
 ** Possible args: **
-    --config local_configs.JARVIS.DFormerv2_Base_custom \
+    --config local_configs.JARVIS.DFormerv2_Base_frequent_val \
     --gpus 1 \
-    --continue_fpath checkpoints/Dformer_format_DFormerv2_B/epoch-47_miou_67.15.pth \
-    --save_path inference_results \
+    --continue_fpath checkpoints\Dformer_format_DFormerv2_B_freqval\epoch-8_miou_66.35.pth \
+    --save_path inference_results/realsense \
     --show_image \
     --verbose
 
@@ -31,7 +35,8 @@ docker-compose exec dformer bash -c "find /workspace/checkpoints -name '*.pth' -
 **validate best script**
 docker-compose exec dformer bash /workspace/validate_best.sh
 
-
+**Show depth map holes as an overlay on top of the original RGB image**
+docker exec dformer-dformer-1 python visualize_missing_depth.py --rgb datasets/Realsense_inference_test/RGB/1728571465.516413927.png --depth datasets/Realsense_inference_test/Depth/1728571465.516413927.png --output inference_results/realsense/missing_depth_overlay.png
 
 ✅ SOLUTION SUMMARY
 The training was getting stuck due to several issues that we fixed:

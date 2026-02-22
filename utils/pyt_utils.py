@@ -178,11 +178,33 @@ def load_model(model, model_file, is_restore=False):
     t_ioend = time.time()
 
     if is_restore:
-        new_state_dict = OrderedDict()
-        for k, v in state_dict.items():
-            name = "module." + k
-            new_state_dict[name] = v
-        state_dict = new_state_dict
+        # Check if the model expects "module." prefix (DDP) or not (single GPU)
+        model_keys = set(model.state_dict().keys())
+        ckpt_keys = set(state_dict.keys())
+        
+        # Determine if model expects module. prefix
+        model_has_module = any(k.startswith("module.") for k in model_keys)
+        ckpt_has_module = any(k.startswith("module.") for k in ckpt_keys)
+        
+        if model_has_module and not ckpt_has_module:
+            # Model expects module. prefix, checkpoint doesn't have it - add prefix
+            new_state_dict = OrderedDict()
+            for k, v in state_dict.items():
+                name = "module." + k
+                new_state_dict[name] = v
+            state_dict = new_state_dict
+            logger.info("Added 'module.' prefix to checkpoint keys for DDP model")
+        elif not model_has_module and ckpt_has_module:
+            # Model doesn't expect module. prefix, checkpoint has it - strip prefix
+            new_state_dict = OrderedDict()
+            for k, v in state_dict.items():
+                if k.startswith("module."):
+                    name = k[7:]  # Strip "module." prefix
+                else:
+                    name = k
+                new_state_dict[name] = v
+            state_dict = new_state_dict
+            logger.info("Stripped 'module.' prefix from checkpoint keys for non-DDP model")
 
     model.load_state_dict(state_dict, strict=True)
     ckpt_keys = set(state_dict.keys())

@@ -13,7 +13,7 @@ def create_inference_comparison():
     
     # Paths
     rgb_dir = "datasets/Dformer_format/RGB"
-    pred_dir = "inference_results/Dformer_format/RGB"
+    pred_dir = "inference_results/Dformer_format/_epoch-8"
     
     # Class names for JARVIS dataset (18 classes + background)
     class_names = [
@@ -138,7 +138,7 @@ def create_inference_comparison():
                       fontsize=8, verticalalignment='center',
                       transform=legend_ax.transAxes)
     
-    plt.suptitle(f'DFormer Inference Results - Best mIoU: 21.47%\nJARVIS Dataset (18 classes)', 
+    plt.suptitle(f'DFormer Inference Results - Best mIoU: 66.35%\nJARVIS Dataset (18 classes)', 
                  fontsize=16, fontweight='bold')
     
     # Save the comparison
@@ -149,8 +149,8 @@ def create_inference_comparison():
     # Show statistics
     print(f"\n📊 Inference Results Summary:")
     print(f"   • Total predictions: {len(pred_files)}")
-    print(f"   • Best mIoU: 21.47%")
-    print(f"   • Model: epoch-47_miou_67.15")
+    print(f"   • Best mIoU: 66.35%")
+    print(f"   • Model: epoch-8_miou_66.35")
     print(f"   • Dataset: JARVIS (18 classes)")
     print(f"\n🎨 Class Colors:")
     for i, (class_name, color) in enumerate(zip(class_names[:10], color_palette[:10])):

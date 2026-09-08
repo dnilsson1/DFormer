@@ -1,0 +1,112 @@
+# ─── CurvePT Default Configuration ───────────────────────────────────────────
+# Override any key via CLI: python train.py --config configs/default.yaml --model.num_queries 25
+
+model:
+  # Backbone
+  rgb_backbone: "dinov2_vitb14"       # DINOv2 variant (vitb14 = 86M params)
+  rgb_embed_dim: 768                  # DINOv2-B output dimension
+  lora_rank: 16                       # LoRA rank for Q,V projections (upgraded from 8)
+  lora_alpha: 32                      # LoRA scaling factor (upgraded from 16)
+  lora_num_blocks: 6                  # Number of final ViT blocks to adapt (upgraded from 4)
+  freeze_backbone: true               # Freeze DINOv2 base weights
+
+  # Geometric encoder
+  geo_in_channels: 4                  # depth (1) + normals (3)
+  geo_embed_dim: 256                  # Geometric feature dimension
+  geo_num_layers: 4                   # ConvNeXt stem layers
+
+  # Fusion: "spatial" (fast 2D ConvNeXt fusion, saves >15GB VRAM) or "cross_attention"
+  fusion_type: "spatial"
+  fusion_num_heads: 8                 # Cross-attention heads (used if fusion_type="cross_attention")
+  fusion_num_layers: 2                # Fusion transformer layers
+
+  # Curve decoder
+  num_queries: 20                     # Max DLOs per frame
+  num_nodes: 64                       # Skeleton nodes per curve
+  use_bspline: true                   # Parametric C^2 B-spline curve representation (eliminates jitter)
+  num_ctrl_points: 12                 # Number of B-spline control points (12 control points fit complex curves with <0.03mm error)
+  num_decoder_layers: 6               # Iterative refinement layers
+  decoder_num_heads: 12               # Multi-head attention heads
+  decoder_dim_feedforward: 2048       # FFN hidden dimension
+  decoder_dropout: 0.1                # Dropout rate
+
+  # Stereo (optional)
+  use_stereo: false                   # Enable stereo cross-attention
+  stereo_num_heads: 8
+
+data:
+  # Image
+  image_width: 1280
+  image_height: 720
+  patch_size: 14                      # Must match DINOv2 patch size
+
+  # Dataset paths
+  train_dir: "F:/Jarvis/1k_Curve_Dataset/Curve_Data_Compact_RealSenseD435_v3"
+  val_dir: "F:/Jarvis/1k_Curve_Dataset/Curve_Data_Compact_RealSenseD435_v3"
+  train_split_file: "configs/splits/train.json"
+  val_split_file: "configs/splits/val.json"
+  assembly_dir: "D:/PhD/Jarvis/JARVIS/Tofas_Curve_Dataset"   # render_scene_nurbs.py output
+
+  # Augmentation & Sim-to-Real
+  color_jitter: 0.3
+  random_crop_scale: [0.8, 1.0]
+  horizontal_flip: true
+  depth_noise_sigma: 0.002            # Training-time depth noise
+  depth_dropout: true                 # Random depth patch dropouts (simulates IR sensor holes)
+  cable_cutout: false                 # Random cable occlusions
+  use_noisy_depth: true               # Randomly sample depth_noisy.npz (simulates RealSense sensor noise)
+  normalize_depth: true               # Normalize depth to [0, 1] range
+  max_depth: 3.0                      # Depth clipping distance (meters)
+
+  # Dataloader
+  batch_size: 4
+  num_workers: 8
+  pin_memory: true
+
+training:
+  # Optimizer
+  optimizer: "adamw"
+  lr: 5.0e-5
+  weight_decay: 0.01
+  backbone_lr_factor: 0.2             # LR multiplier for backbone LoRA params (3e-5)
+  grad_accum_steps: 4                 # Gradient accumulation steps (effective batch size 16)
+
+  # Schedule
+  num_epochs: 25
+  warmup_epochs: 1
+  scheduler: "cosine"
+  min_lr: 5.0e-7
+
+  # Mixed precision
+  amp: true
+  grad_clip: 1.0
+
+  # Checkpointing
+  save_every: 10                      # Save checkpoint every N epochs
+  eval_every: 5                       # Evaluate every N epochs
+  log_every: 50                       # Log metrics every N steps
+
+  # Loss weights
+  loss_ordered: 5.0                   # Dominant loss: forces exact node-to-node placement along true curve
+  loss_chamfer: 1.0                   # Secondary loss: gross point set coverage
+  loss_tangent: 2.0                   # Scale-invariant cosine continuity loss (prevents kinks / bending)
+  loss_curvature: 0.1                 # Linear mm second-difference penalty
+  loss_equidistant: 0.1               # Uniform node spacing penalty (in mm)
+  loss_visibility: 1.0
+  loss_confidence: 2.0
+  loss_radius: 0.5
+  loss_aux_weight: 0.7                # Weight for intermediate decoder layer losses
+
+  # Hungarian matching
+  match_cost_chamfer: 3.0
+  match_cost_ordered: 3.0             # Balanced ordered L1 in Hungarian assignment
+  match_cost_visibility: 1.0
+  match_cost_confidence: 1.0
+
+logging:
+  project: "curvept"
+  entity: null                        # WandB entity (team name)
+  run_name: null                      # Auto-generated if null
+  mode: null                          # "online", "offline", or "disabled" (null uses default or WANDB_MODE)
+  log_images: true
+  log_images_every: 500               # Log visualization every N steps

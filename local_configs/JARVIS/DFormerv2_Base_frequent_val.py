@@ -43,6 +43,11 @@ C.class_names = [
     "invertor_cover", "nut", "pump_bracket", "pump_valve", "screw", "tube",
 ]
 
+# Class 8 is a structural Blender root collection with no direct geometry.
+# Keep source masks as-is, but ignore class 8 consistently during train/eval.
+C.ignore_label_ids = [8]
+C.metric_ignore_classes = [8]
+
 """Image Config"""
 C.background = 255
 C.image_height = 512

@@ -23,13 +23,13 @@ class ColorJitter:
 
     def __call__(self, sample: dict) -> dict:
         rgb = sample["rgb"]
-        rgb = TF.adjust_brightness(rgb, 1.0 + np.random.uniform(-self.brightness,
+        rgb = TF.adjust_brightness(rgb, 1.0 + random.uniform(-self.brightness,
                                                                    self.brightness))
-        rgb = TF.adjust_contrast(rgb, 1.0 + np.random.uniform(-self.contrast,
+        rgb = TF.adjust_contrast(rgb, 1.0 + random.uniform(-self.contrast,
                                                                  self.contrast))
-        rgb = TF.adjust_saturation(rgb, 1.0 + np.random.uniform(-self.saturation,
+        rgb = TF.adjust_saturation(rgb, 1.0 + random.uniform(-self.saturation,
                                                                    self.saturation))
-        rgb = TF.adjust_hue(rgb, np.random.uniform(-self.hue, self.hue))
+        rgb = TF.adjust_hue(rgb, random.uniform(-self.hue, self.hue))
         sample["rgb"] = rgb.clamp(0, 1)
         return sample
 
@@ -61,17 +61,17 @@ class RandomDepthDropout:
         self.max_size = max_size
 
     def __call__(self, sample: dict) -> dict:
-        if np.random.random() > self.p:
+        if random.random() > self.p:
             return sample
 
         depth = sample["depth"]
         _, H, W = depth.shape
-        num_patches = np.random.randint(1, self.max_patches + 1)
+        num_patches = random.randint(1, self.max_patches)
         for _ in range(num_patches):
-            h = np.random.randint(20, min(self.max_size, H))
-            w = np.random.randint(20, min(self.max_size, W))
-            y = np.random.randint(0, max(1, H - h))
-            x = np.random.randint(0, max(1, W - w))
+            h = random.randint(20, min(self.max_size, H) - 1)
+            w = random.randint(20, min(self.max_size, W) - 1)
+            y = random.randint(0, max(1, H - h) - 1)
+            x = random.randint(0, max(1, W - w) - 1)
             depth[:, y:y+h, x:x+w] = 0.0
         sample["depth"] = depth
         return sample
@@ -88,16 +88,16 @@ class RandomCableCutout:
         self.max_size = max_size
 
     def __call__(self, sample: dict) -> dict:
-        if np.random.random() > self.p:
+        if random.random() > self.p:
             return sample
 
         rgb = sample["rgb"]
         depth = sample["depth"]
         _, H, W = rgb.shape
-        h = np.random.randint(20, min(self.max_size, H))
-        w = np.random.randint(20, min(self.max_size, W))
-        y = np.random.randint(0, max(1, H - h))
-        x = np.random.randint(0, max(1, W - w))
+        h = random.randint(20, min(self.max_size, H) - 1)
+        w = random.randint(20, min(self.max_size, W) - 1)
+        y = random.randint(0, max(1, H - h) - 1)
+        x = random.randint(0, max(1, W - w) - 1)
 
         rgb[:, y:y+h, x:x+w] = 0.0
         depth[:, y:y+h, x:x+w] = 0.0
@@ -117,7 +117,7 @@ class RandomHorizontalFlip:
         self.p = p
 
     def __call__(self, sample: dict) -> dict:
-        if np.random.random() > self.p:
+        if random.random() > self.p:
             return sample
 
         # Flip images

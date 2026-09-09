@@ -1,0 +1,141 @@
+_wandb:
+    value:
+        cli_version: 0.29.0
+        e:
+            9v16l9zaj8jbide7yfmlv1iab87swa0l:
+                args:
+                    - --config
+                    - configs/fine_tune.yaml
+                codePath: curvept\train.py
+                codePathLocal: train.py
+                cpu_count: 16
+                cpu_count_logical: 32
+                cudaVersion: "13.0"
+                disk:
+                    /:
+                        total: "2000381014016"
+                        used: "978020786176"
+                email: daniel.nilsson111@gmail.com
+                executable: D:\PhD\Jarvis\DFormer\.venv-curvept\Scripts\python.exe
+                git:
+                    commit: 083e418f71d9dea46cd794c92de5b49b9d39d1b2
+                    remote: https://github.com/VCIP-RGBD/DFormer.git
+                gpu: NVIDIA GeForce RTX 3090
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ampere
+                      cudaCores: 10496
+                      memoryTotal: "25769803776"
+                      name: NVIDIA GeForce RTX 3090
+                      uuid: GPU-7a6a95d4-6f4b-1988-06c8-cebe406e0f64
+                host: DESKTOP-178FE8U
+                memory:
+                    total: "34280656896"
+                os: Windows-10-10.0.19045-SP0
+                program: D:\PhD\Jarvis\DFormer\curvept\train.py
+                python: CPython 3.12.12
+                root: D:\PhD\Jarvis\DFormer\curvept
+                startedAt: "2026-09-08T23:01:25.055156Z"
+                writerId: 9v16l9zaj8jbide7yfmlv1iab87swa0l
+        m: []
+        python_version: 3.12.12
+        t:
+            "1":
+                - 1
+                - 41
+            "2":
+                - 1
+                - 41
+            "3":
+                - 16
+            "4": 3.12.12
+            "5": 0.29.0
+            "8":
+                - 3
+            "12": 0.29.0
+            "13": windows-amd64
+data:
+    value:
+        assembly_dir: D:/PhD/Jarvis/JARVIS/Tofas_Curve_Dataset
+        batch_size: 8
+        cable_cutout: false
+        color_jitter: 0.3
+        depth_dropout: true
+        depth_noise_sigma: 0.002
+        horizontal_flip: true
+        image_height: 720
+        image_width: 1280
+        max_depth: 3
+        normalize_depth: true
+        num_workers: 8
+        patch_size: 14
+        pin_memory: true
+        random_crop_scale:
+            - 0.8
+            - 1
+        train_dir: F:/Jarvis/1k_Curve_Dataset/Curve_Data_Compact_RealSenseD435_v3
+        train_split_file: configs/splits/train.json
+        use_noisy_depth: true
+        val_dir: F:/Jarvis/1k_Curve_Dataset/Curve_Data_Compact_RealSenseD435_v3
+        val_split_file: configs/splits/val.json
+logging:
+    value:
+        entity: null
+        log_images: true
+        log_images_every: 500
+        mode: null
+        project: curvept
+        run_name: null
+model:
+    value:
+        decoder_dim_feedforward: 2048
+        decoder_dropout: 0.1
+        decoder_num_heads: 12
+        freeze_backbone: true
+        fusion_num_heads: 8
+        fusion_num_layers: 2
+        fusion_type: spatial
+        geo_embed_dim: 256
+        geo_in_channels: 4
+        geo_num_layers: 4
+        lora_alpha: 32
+        lora_num_blocks: 6
+        lora_rank: 16
+        num_ctrl_points: 12
+        num_decoder_layers: 6
+        num_nodes: 64
+        num_queries: 20
+        rgb_backbone: dinov2_vitb14
+        rgb_embed_dim: 768
+        stereo_num_heads: 8
+        use_bspline: true
+        use_stereo: false
+training:
+    value:
+        amp: true
+        backbone_lr_factor: 0.2
+        eval_every: 5
+        grad_accum_steps: 4
+        grad_clip: 1
+        log_every: 50
+        loss_aux_weight: 0.7
+        loss_chamfer: 1
+        loss_confidence: 2
+        loss_curvature: 0.1
+        loss_equidistant: 0.1
+        loss_ordered: 5
+        loss_radius: 0.5
+        loss_tangent: 2
+        loss_visibility: 1
+        lr: 5e-05
+        match_cost_chamfer: 3
+        match_cost_confidence: 1
+        match_cost_ordered: 3
+        match_cost_visibility: 1
+        min_lr: 5e-07
+        num_epochs: 25
+        optimizer: adamw
+        save_every: 10
+        scheduler: cosine
+        warmup_epochs: 1
+        weight_decay: 0.01

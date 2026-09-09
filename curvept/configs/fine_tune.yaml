@@ -59,7 +59,7 @@ data:
   max_depth: 3.0                      # Depth clipping distance (meters)
 
   # Dataloader
-  batch_size: 4
+  batch_size: 8
   num_workers: 8
   pin_memory: true
 

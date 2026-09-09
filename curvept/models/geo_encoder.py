@@ -95,7 +95,12 @@ class GeometricEncoder(nn.Module):
         x = self.patch_embed(x)  # (B, embed_dim, H/14, W/14)
 
         # Add positional encoding
-        x = x + self.pos_embed
+        pos_embed = self.pos_embed
+        if pos_embed.shape[2:] != x.shape[2:]:
+            pos_embed = F.interpolate(
+                pos_embed, size=x.shape[2:], mode="bilinear", align_corners=False
+            )
+        x = x + pos_embed
 
         # Local geometric processing
         x = self.blocks(x)  # (B, embed_dim, H_t, W_t)

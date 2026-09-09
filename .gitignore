@@ -177,3 +177,7 @@ infer*.sh
 
 # temp ignore:
 **/*_temp*
+
+# wandb logs
+curvept/wandb/*
+wandb/*

@@ -15,6 +15,13 @@ Usage:
 """
 
 import os
+# Prevent OpenBLAS thread allocation exhaustion in DataLoader workers on Windows
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import sys
 import argparse
 import time
@@ -408,13 +415,14 @@ def main():
             split_file=dc.get("val_split_file"),
             use_noisy_depth=False,
         )
+        val_workers = min(2, dc.get("num_workers", 2))
         val_loader = DataLoader(
             val_dataset,
             batch_size=dc["batch_size"],
             shuffle=False,
-            num_workers=dc["num_workers"],
+            num_workers=val_workers,
             pin_memory=dc["pin_memory"],
-            persistent_workers=persistent_workers,
+            persistent_workers=False,
         )
 
     # Scheduler (accounting for gradient accumulation)
@@ -507,6 +515,12 @@ def main():
                 model, optimizer, scheduler, scaler, epoch, train_loss,
                 ckpt_dir / f"epoch_{epoch:03d}.pt"
             )
+
+        # Always save latest checkpoint
+        save_checkpoint(
+            model, optimizer, scheduler, scaler, epoch, train_loss,
+            ckpt_dir / "last.pt"
+        )
 
     # Save final
     save_checkpoint(

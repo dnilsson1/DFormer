@@ -426,19 +426,24 @@ def main():
     scaler = GradScaler("cuda", enabled=tc["amp"])
 
     # Resume from checkpoint
+    resume_path = args.resume or tc.get("resume")
+    reset_sched = args.reset_scheduler or tc.get("reset_scheduler", False)
+
     start_epoch = 0
-    if args.resume:
-        print(f"Resuming from {args.resume}...")
-        ckpt = torch.load(args.resume, map_location=device, weights_only=False)
+    if resume_path:
+        print(f"Resuming from {resume_path}...")
+        ckpt = torch.load(resume_path, map_location=device, weights_only=False)
         model.load_state_dict(ckpt["model_state_dict"])
-        if not args.reset_scheduler:
+        if not reset_sched:
             optimizer.load_state_dict(ckpt["optimizer_state_dict"])
             scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+            scaler.load_state_dict(ckpt["scaler_state_dict"])
+            start_epoch = ckpt["epoch"] + 1
+            print(f"  Resumed at epoch {start_epoch}")
         else:
-            print("  [RESET] Initializing fresh optimizer and scheduler for fine-tuning")
-        scaler.load_state_dict(ckpt["scaler_state_dict"])
-        start_epoch = ckpt["epoch"] + 1
-        print(f"  Resumed at epoch {start_epoch}")
+            print("  [FINE-TUNE] Initialized fresh optimizer and scheduler for fine-tuning")
+            start_epoch = 0
+            print(f"  Starting fine-tuning for {tc['num_epochs']} fresh epochs (epochs 0 to {tc['num_epochs'] - 1})")
 
     # Create checkpoint directory
     ckpt_dir = Path("checkpoints")

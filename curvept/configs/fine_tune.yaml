@@ -64,6 +64,10 @@ data:
   pin_memory: true
 
 training:
+  # Fine-tuning source
+  resume: "checkpoints/best.pt"       # Checkpoint to fine-tune from
+  reset_scheduler: true               # Fresh optimizer and LR schedule for fine-tuning
+
   # Optimizer
   optimizer: "adamw"
   lr: 5.0e-5
